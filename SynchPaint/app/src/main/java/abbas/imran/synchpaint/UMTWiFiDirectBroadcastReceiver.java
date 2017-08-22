@@ -149,6 +149,10 @@ public class UMTWiFiDirectBroadcastReceiver extends BroadcastReceiver {
 
 
 
+
+                String reason=networkInfo.getReason();
+
+
                 if (groupMembers.isEmpty()){
                     mUMTDirect.teardownSockets(false);
                 }
@@ -167,8 +171,8 @@ public class UMTWiFiDirectBroadcastReceiver extends BroadcastReceiver {
         // Respond to this device's wifi state changing
         else if (WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION.equals(action)) {
 
-            WifiP2pDevice device = intent.getParcelableExtra(WifiP2pManager.EXTRA_WIFI_P2P_DEVICE);
-             mUMTDirect.setCurrentDevice(device);
+           WifiP2pDevice device = intent.getParcelableExtra(WifiP2pManager.EXTRA_WIFI_P2P_DEVICE);
+            mUMTDirect.setCurrentDevice(device);
 
 
         }

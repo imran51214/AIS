@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 
 //wifi p2p
+import android.icu.util.IslamicCalendar;
 import android.net.wifi.WifiManager;
 import android.net.wifi.WpsInfo;
 import android.net.wifi.p2p.WifiP2pConfig;
@@ -22,12 +23,15 @@ import android.content.Context;
 import android.os.Handler;
 import android.widget.Toast;
 
+import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 
@@ -43,12 +47,19 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
     private static final String SERVICE_REG_TYPE = "_presence._tcp";
     private static final String TXTRECORD_PROP_AVAILABLE = "available";
     private int SERVER_PORT;
+    private String Service_Name;
     private WifiP2pDnsSdServiceInfo service;
     private boolean isServiceHost=false;
     private boolean isGroupOwner=false;
+
+
     //Socket  Info
     private boolean isClientRegistrationStarted=false;
     private boolean isClientConnected=false;
+
+    // Service Request
+    WifiP2pDnsSdServiceRequest serviceRequest;
+    private boolean isServiceRequested=false;
 
 
 
@@ -119,7 +130,60 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
 
     private void initializeDirect(){
 
-      if (umtConnection != null)
+
+        if (isServiceHost()){
+
+            // Remove Service
+
+            removeService(new UMTCallback() {
+                @Override
+                public void response(boolean cmdStatus, int failureReason) {
+                    if (cmdStatus){
+
+                        Toast.makeText(mContext, "Service removed successfully", Toast.LENGTH_SHORT).show();
+                    }
+                    else{
+                        Toast.makeText(mContext, "Failed to Remove a service", Toast.LENGTH_SHORT).show();
+
+                    }
+
+                }
+            });
+
+            // Remove Service
+
+            WifiP2pManager.ActionListener doNothing = new WifiP2pManager.ActionListener() {
+                @Override
+                public void onSuccess() {
+
+                }
+
+                @Override
+                public void onFailure(int reason) {
+
+                }
+            };
+
+
+
+            // Cancel any ongoing p2p group negotiation
+            manager.cancelConnect(channel, doNothing);
+
+            manager.clearLocalServices(channel,doNothing);
+            manager.clearServiceRequests(channel, doNothing);
+
+
+            if (isServiceRequested) {
+                //Remove a specified service discovery request added with addServiceRequest
+                manager.removeServiceRequest(channel, serviceRequest, doNothing);
+            }
+
+
+        }
+
+
+
+        if (umtConnection != null)
       {
           umtConnection.tearDown();
       }
@@ -154,6 +218,7 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
         mContext.registerReceiver(mReceiver,mIntentFilter);
         //////////////////////////////////////////////////////////////////////////
 
+
         isServiceHost=false;
         isGroupOwner=false;
         isClientRegistrationStarted=false;
@@ -166,45 +231,23 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
 
         List<String>  registeredPeersAddresses = new ArrayList<String>();
 
-
-        //String registeredMembersList="";
-       // Integer Priority=1;
-
         this.registeredPeers=registeredPeers;
         int i=0;
 
         for (WifiP2pDevice device : registeredPeers)
         {
-
-            registeredPeersAddresses.add(i,device.deviceAddress.toLowerCase());
-
-         /*  if (Priority>1)
-            {
-                registeredMembersList=registeredMembersList + ",";
-            }
-
-            registeredMembersList=registeredMembersList + Integer.toString(Priority)  + ":" + device.deviceAddress.toLowerCase();
-        */
+           registeredPeersAddresses.add(i,device.deviceAddress.toLowerCase());
             i=i+1;
-           // Priority=Priority+1;
         }
-
-
-
-        /*
-        if (registeredMembersList.charAt(registeredMembersList.length()-1)==','){
-            registeredMembersList = registeredMembersList.replace(registeredMembersList.substring(registeredMembersList.length()-1), "");
-        }*/
-
-
-       // Toast.makeText(mContext, registeredMembersList, Toast.LENGTH_SHORT).show();
-
 
         if (isServiceHost && isClientRegistrationStarted){
             umtConnection.synchActiveRegisteredPeersSockets((ArrayList<String>) registeredPeersAddresses);
         }
 
     }
+
+
+
 
    void setCurrentDevice(WifiP2pDevice deviceInfo){
 
@@ -267,36 +310,35 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
 
     public void broadcastService(final String serviceInstance,Integer portNumber,final UMTCallback callback){
 
-        SERVER_PORT=portNumber;
+         SERVER_PORT=portNumber;
 
         // Register service
         Map<String, String> record = new HashMap<String, String>();
-        record.put(TXTRECORD_PROP_AVAILABLE, "visible");
+        //record.put(TXTRECORD_PROP_AVAILABLE, "visible");
         record.put("SERVICE_PORT", Integer.toString(SERVER_PORT));
 
         service = WifiP2pDnsSdServiceInfo.newInstance(
                 serviceInstance, SERVICE_REG_TYPE, record);
 
-        manager.addLocalService(channel, service, new WifiP2pManager.ActionListener() {
 
-            @Override
-            public void onSuccess() {
-                isServiceHost=true;
-                callback.response(true,0);
+                // Register a local service for service discovery.
+                manager.addLocalService(channel, service, new WifiP2pManager.ActionListener() {
 
-            }
+                    @Override
+                    public void onSuccess() {
+                        isServiceHost=true;
+                        callback.response(true,0);
 
-            @Override
-            public void onFailure(int error) {
-                isServiceHost=false;
-                callback.response(false,error);
+                    }
 
-            }
-        });
+                    @Override
+                    public void onFailure(int error) {
+                        isServiceHost=false;
+                        callback.response(false,error);
 
-
-
-
+                    }
+                });
+                // Register a local service for service discovery.
 
     }
 
@@ -326,6 +368,7 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
 
     public void createGroup(final UMTCallback callback){
 
+        //Create a p2p group with the current device as the group owner.
         manager.createGroup(channel, new WifiP2pManager.ActionListener() {
             @Override
             public void onSuccess() {
@@ -379,6 +422,7 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
                             if (devices.containsKey(srcDevice.deviceAddress)){
 
                                SERVER_PORT= Integer.parseInt(devices.get(srcDevice.deviceAddress));
+                               Service_Name=serviceInstance;
 
                             }
 
@@ -406,14 +450,17 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
 
         // After attaching listeners, create a service request and initiate
         //
-        WifiP2pDnsSdServiceRequest serviceRequest;
+
         serviceRequest = WifiP2pDnsSdServiceRequest.newInstance();
+
+        //Add a service discovery request.
         manager.addServiceRequest(channel, serviceRequest,
                 new WifiP2pManager.ActionListener() {
 
                     @Override
                     public void onSuccess() {
 
+                        isServiceRequested=true;
                         Toast.makeText(mContext, "Added service discovery request", Toast.LENGTH_SHORT).show();
                     }
 
@@ -445,8 +492,31 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
 
     public void disconnectWithService(final UMTCallback umtCallback){
 
+        // Remove Service
+        if (isServiceHost()){
 
-        manager.removeGroup(channel, new WifiP2pManager.ActionListener() {
+
+            removeService(new UMTCallback() {
+                @Override
+                public void response(boolean cmdStatus, int failureReason) {
+                    if (cmdStatus){
+
+                        Toast.makeText(mContext, "Service removed successfully", Toast.LENGTH_SHORT).show();
+                    }
+                    else{
+                        Toast.makeText(mContext, "Failed to Remove a service", Toast.LENGTH_SHORT).show();
+
+                    }
+
+                }
+            });
+
+        }
+        // Remove Service
+
+
+       // Remove the current p2p group.
+         manager.removeGroup(channel, new WifiP2pManager.ActionListener() {
             @Override
             public void onSuccess() {
                 umtCallback.response(true,0);
@@ -461,18 +531,57 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
 
             }
         });
+    // Remove the current p2p group.
 
 
     }
 
-    public void disconnectGroup(final UMTCallback callback){
+
+
+
+    private void disconnectWithGroup(final UMTCallback callback){
+
+        // Remove the current p2p group.
+        manager.removeGroup(channel, new WifiP2pManager.ActionListener() {
+            @Override
+            public void onSuccess() {
+                callback.response(true,0);
+
+            }
+
+            @Override
+            public void onFailure(int reason) {
+                callback.response(false,1);
+
+            }
+        });
+        // Remove the current p2p group.
+
+
 
     }
 
-    public void removeService(final UMTCallback callback){
+    private void removeService(final UMTCallback callback){
 
 
-        if (isServiceHost()){
+        WifiP2pManager.ActionListener doNothing = new WifiP2pManager.ActionListener() {
+            @Override
+            public void onSuccess() {
+
+            }
+
+            @Override
+            public void onFailure(int reason) {
+
+            }
+        };
+
+        // Clear all registered local services of service discovery.
+        manager.clearLocalServices(channel,doNothing);
+
+
+       if (isServiceHost()){
+
 
             manager.removeLocalService(channel, service, new WifiP2pManager.ActionListener() {
 
@@ -520,11 +629,146 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
         mContext.unregisterReceiver(mReceiver);
         umtConnection.tearDown();
 
+        if (isServiceHost()){
+            serviceHostTearDown();
+        }
+        else {
+            serviceClientTearDown();
+        }
+
     }
+
+
+    private void serviceHostTearDown()
+    {
+
+        // Remove Service
+        if (isServiceHost()){
+
+
+            removeService(new UMTCallback() {
+                @Override
+                public void response(boolean cmdStatus, int failureReason) {
+                    if (cmdStatus){
+
+                        Toast.makeText(mContext, "Service removed successfully", Toast.LENGTH_SHORT).show();
+                    }
+                    else{
+                        Toast.makeText(mContext, "Failed to Remove a service", Toast.LENGTH_SHORT).show();
+
+                    }
+
+                }
+            });
+
+        }
+        // Remove Service
+
+
+        WifiP2pManager.ActionListener doNothing = new WifiP2pManager.ActionListener() {
+            @Override
+            public void onSuccess() {
+
+            }
+
+            @Override
+            public void onFailure(int reason) {
+
+            }
+        };
+
+
+        // Clear all registered local services of service discovery.
+        manager.clearLocalServices(channel,doNothing);
+
+
+        // Cancel any ongoing p2p group negotiation
+        manager.cancelConnect(channel, doNothing);
+
+        //Stop an ongoing peer discovery
+        manager.stopPeerDiscovery(channel, doNothing);
+
+
+        disconnectWithGroup(new UMTCallback() {
+            @Override
+            public void response(boolean cmdStatus, int failureReason) {
+                if (cmdStatus) {
+                    Toast.makeText(mContext, "Group Disconnection Successfull", Toast.LENGTH_SHORT).show();
+                } else {
+
+                   // Toast.makeText(mContext, "Group Disconnection Failed", Toast.LENGTH_SHORT).show();
+
+                }
+
+            }
+        });
+    }
+
+    private void serviceClientTearDown()
+    {
+
+
+        WifiP2pManager.ActionListener doNothing = new WifiP2pManager.ActionListener() {
+            @Override
+            public void onSuccess() {
+
+            }
+
+            @Override
+            public void onFailure(int reason) {
+
+            }
+        };
+
+
+
+        if (isServiceRequested) {
+
+            //Remove a specified service discovery request added with addServiceRequest
+            manager.removeServiceRequest(channel, serviceRequest, doNothing);
+
+        }
+
+
+        // Cancel any ongoing p2p group negotiation
+        manager.cancelConnect(channel, doNothing);
+
+        //Clear all registered service discovery requests.
+        manager.clearServiceRequests(channel, doNothing);
+
+        //Stop an ongoing peer discovery
+        manager.stopPeerDiscovery(channel, doNothing);
+
+
+        disconnectWithGroup(new UMTCallback() {
+            @Override
+            public void response(boolean cmdStatus, int failureReason) {
+                if (cmdStatus) {
+                    Toast.makeText(mContext, "Group Disconnection Successfull", Toast.LENGTH_SHORT).show();
+                } else {
+
+                   // Toast.makeText(mContext, "Group Disconnection Failed", Toast.LENGTH_SHORT).show();
+
+                }
+
+            }
+        });
+
+    }
+
 
     public  void teardownSockets(Boolean groupAlive){
 
+        groupMembers = new TreeMap<Integer, String>();
 
+        if (isClientConnected){
+            Toast.makeText(mContext, "Group Owner Left/Group Disolved", Toast.LENGTH_SHORT).show();
+
+
+            groupMembers=umtConnection.getGroupMembers();
+
+        }
+        
         if (isClientRegistrationStarted) {
             initializeDirect();
         }
@@ -535,13 +779,80 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
             isClientRegistrationStarted=false;
             isClientConnected=false;
 
+            if (groupMembers.size()>1) {
+
+                reformGroup();
+            }
+
+
         }
+
 
 
 
     }
 
-    public void removeGroup(final UMTCallback umtCallback){
+
+    private void reformGroup(){
+
+        String GroupOwnerAddress;
+
+        GroupOwnerAddress=groupMembers.lastEntry().getValue();
+
+        if(GroupOwnerAddress.equals(CurrentDevice.deviceAddress)){
+            initializeDirect();
+
+
+          broadcastService(Service_Name,SERVER_PORT,new UMTCallback() {
+              @Override
+              public void response(boolean cmdStatus, int failureReason) {
+
+                  if (cmdStatus) {
+                      Toast.makeText(mContext, "Service Registered", Toast.LENGTH_SHORT).show();
+
+                      createGroup(new UMTCallback() {
+                          @Override
+                          public void response(boolean cmdStatus, int failureReason) {
+
+                              if (cmdStatus){
+                                  Toast.makeText(mContext, "Group Created Successfully", Toast.LENGTH_SHORT).show();
+                              }
+
+                          }
+                      });
+                  } else {
+
+                      Toast.makeText(mContext, "Service Not Registered", Toast.LENGTH_SHORT).show();
+
+                  }
+
+              }
+          });
+
+        }
+
+        else {
+
+            connectToService(Service_Name, new UMTCallback() {
+                @Override
+                public void response(boolean cmdStatus, int failureReason) {
+                    if (cmdStatus) {
+                        Toast.makeText(mContext, "Connected with the service", Toast.LENGTH_SHORT).show();
+                    }
+                    else {
+                        Toast.makeText(mContext, "Service discovery failed", Toast.LENGTH_SHORT).show();
+
+                    }
+
+                }
+            });
+
+        }
+
+    }
+
+
+    private void removeGroup(){
 
 
        //Disconnect Device
@@ -552,18 +863,17 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
                 public void onGroupInfoAvailable(WifiP2pGroup group) {
                     if (group != null && manager != null && channel != null
                             && group.isGroupOwner()) {
+                        //Remove the current p2p group.
                         manager.removeGroup(channel, new WifiP2pManager.ActionListener() {
 
                             @Override
                             public void onSuccess() {
-                                umtCallback.response(true,0);
                                // Log.d(TAG, "removeGroup onSuccess -");
                             }
 
                             @Override
                             public void onFailure(int reason) {
-                                umtCallback.response(false,reason  );
-                               // Log.d(TAG, "removeGroup onFailure -" + reason);
+                             // Log.d(TAG, "removeGroup onFailure -" + reason);
                             }
                         });
                     }
@@ -587,6 +897,7 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
 
                     umtConnection.startServerSocket(SERVER_PORT);
                     isClientRegistrationStarted=true;
+                    isGroupOwner=true;
 
                     Toast.makeText(mContext, "Group Owner", Toast.LENGTH_SHORT).show();
 
@@ -597,6 +908,7 @@ public class UMTDirect implements WifiP2pManager.ConnectionInfoListener,WifiP2pM
 
                     InetAddress mAddress;
                     mAddress=info.groupOwnerAddress;
+                    isGroupOwner=false;
 
                     umtConnection.connectToServer(mAddress,SERVER_PORT ,CurrentDevice.deviceAddress);
                     isClientConnected=true;

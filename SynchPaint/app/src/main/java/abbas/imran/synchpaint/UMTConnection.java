@@ -32,8 +32,9 @@ public class UMTConnection {
     private UMTServer mUMTServer;
     private UMTClient mUMTClient;
     private Hashtable registeredClients = null;
+    TreeMap<Integer, String> groupMembers;
     TreeMap<Integer, String> dataContainer;
-    private String LatestMessage;
+    Integer Priority=1;
     private static final String TAG = "DocConnection";
     private Socket mSocket = null;
     PrintWriter prClient=null;
@@ -55,6 +56,7 @@ public class UMTConnection {
 
         registeredClients = new Hashtable();
         dataContainer= new TreeMap<Integer, String>();
+        groupMembers = new TreeMap<Integer, String>();
 
     }
 
@@ -101,6 +103,11 @@ public class UMTConnection {
 
     }
 
+    public TreeMap getGroupMembers(){
+
+        return groupMembers;
+
+    }
 
 
     public void synchActiveRegisteredPeersSockets(ArrayList<String> registeredPeersAddresses){
@@ -147,8 +154,6 @@ public class UMTConnection {
 
     public void synchDoc(String Message){
 
-        LatestMessage=Message;
-
 
         if (isClient){
 
@@ -166,25 +171,68 @@ public class UMTConnection {
     //Synch Doc
 
 
+    //Send group members information to all clients
+
+    public void sendGroupInfoToClients(){
+        UMTData umtDataSend=new UMTData();
+        List<List<String >> groupMembersList= new ArrayList<List<String>>();
+        List<String> groupMember;
+
+        umtDataSend.Put("type","GroupInfo");
+
+        Set set = groupMembers.entrySet();
+
+        Iterator iterator = set.iterator();
+
+        while(iterator.hasNext()) {
+
+           Map.Entry mentry = (Map.Entry)iterator.next();
+
+           Integer Priority = Integer.parseInt(mentry.getKey().toString());
+           String MacAddress = mentry.getValue().toString();
+
+            groupMember=new ArrayList();
+
+            groupMember.add(Integer.toString(Priority));
+            groupMember.add(MacAddress);
+            groupMembersList.add(groupMember);
+
+        }
+
+
+        umtDataSend.Put("GroupMembers",groupMembersList);
+        String umtDataString = umtDataSend.getDataString();
+        informAll(umtDataString);
+
+    }
+
+    //Send group members information to all clients
+
     // Informs all the connected clients about the latest update
     public void informAll( String Message) {
 
-        LatestMessage=Message;
+
 
         UMTData umtDataReceive;
         umtDataReceive = new UMTData(Message);
 
-        dataContainer.put(Integer.valueOf(umtDataReceive.get("timeStamp").toString()),Message);
+        if(!umtDataReceive.get("type").equals("GroupInfo"))
+        {
+            dataContainer.put(Integer.valueOf(umtDataReceive.get("timeStamp").toString()),Message);
+        }
 
 
         try {
             Enumeration clients = registeredClients.elements();
+
+
             while(clients.hasMoreElements()){
 
                 Socket recipient = (Socket)clients.nextElement();
                  new PrintWriter(recipient.getOutputStream(),true).println(Message);
 
             }
+
         }
         catch (Exception e){
 
@@ -263,12 +311,13 @@ public class UMTConnection {
                         registeredClients.put(DeviceMacAddress,mSocket);
 
 
-                        /*
-                        if (LatestMessage != null) {
-                            new PrintWriter(mSocket.getOutputStream(), true).println(LatestMessage);
-                        }
-                        */
+                        groupMembers.put(Priority,DeviceMacAddress);
+                        Priority=Priority+1;
+                        sendGroupInfoToClients();
 
+
+
+                        // Synchronize the new client data state
                         try {
 
                             Set set = dataContainer.entrySet();
@@ -446,7 +495,33 @@ public class UMTConnection {
                             timeStamp=Integer.parseInt(tokenizer.nextToken());
 
                         }
+                        else if (msg.contains("GroupInfo"))  {
+
+                            UMTData umtDataReceive=new UMTData(msg);
+
+                            List<List<String >> groupMembersReceived= new ArrayList<List<String>>();
+                            groupMembersReceived = umtDataReceive.getArray("GroupMembers");
+
+                            groupMembers.clear();
+
+                            for (int i = 0; i < groupMembersReceived.size(); i++) {
+                                List<String> member = groupMembersReceived.get(i);
+                                groupMembers.put(Integer.parseInt(member.get(0)), member.get(1));
+
+                            }
+
+
+
+                        }
                         else {
+
+                          //Data Container to maintain the history of data packets Received
+                           UMTData umtDataReceive;
+                           umtDataReceive = new UMTData(msg);
+                          dataContainer.put(Integer.valueOf(umtDataReceive.get("timeStamp").toString()),msg);
+                          // Data Container to maintain the history of data packets
+
+
 
                             Bundle messageBundle = new Bundle();
                             messageBundle.putString("msg", msg);

@@ -120,12 +120,6 @@ public class MainActivity extends AppCompatActivity implements OnClickListener {
 
 
 
-    public void initializeUMT(){
-
-
-
-    }
-
 
 //Drawing
     public void paintClicked(View view) {
@@ -378,6 +372,7 @@ public class MainActivity extends AppCompatActivity implements OnClickListener {
     @Override
     protected void onDestroy() {
 
+        /*
        if (umtDirect.isServiceHost()){
 
             // Remove Service
@@ -401,6 +396,7 @@ public class MainActivity extends AppCompatActivity implements OnClickListener {
 
 
        }
+       */
 
         umtDirect.teardown();
         super.onDestroy();
